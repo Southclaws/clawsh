@@ -1,10 +1,10 @@
 use nom::{
     branch::{alt, permutation},
-    bytes::complete::{tag, take_till, take_till1, take_while1},
+    bytes::complete::{tag, take_till, take_till1, take_until, take_while1},
     character::complete::{anychar, char, multispace1},
     combinator::opt,
-    error::context,
-    multi::{fold_many1, many0},
+    error::{context, ParseError},
+    multi::{fold_many1, many0, many1},
     sequence::{terminated, tuple},
     IResult,
 };
@@ -70,95 +70,58 @@ use nom::{
 //     .map(|(_, v)| v)
 // }
 
-/// Open and close separators for pipe sections.
-
-fn stream_pipe(input: &str) -> IResult<&str, char> {
+fn procedure(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
     context(
-        "stream_pipe",
+        "procedure",
         //
-        char('|'),
-    )(input)
+        many1(alt((
+            //
+            // tuple((tag("|{"), js_pipe)), //
+            // tuple((tag("|<"), jq_pipe)), //
+            tuple((take_until("|{"), js_pipe)),
+            tuple((take_until("|<"), jq_pipe)),
+            // tuple((take_until("|("), js_pipe)),
+            // tuple((take_until("|["), js_pipe)),
+            // tuple((take_until("|"), js_pipe)),
+            // tuple((take_until("&&"), js_pipe)),
+        ))),
+    )(i)
 }
 
-fn conditional_chain(input: &str) -> IResult<&str, &str> {
-    context(
-        "conditional_chain",
-        //
-        tag("&&"),
-    )(input)
+#[test]
+fn test_procedure() {
+    let r = procedure("curl |{ js code }| manager |< .jq.expr >|");
+    println!("{:?}", r);
 }
 
+/// JavaScript pipe
+///
 fn js_pipe(i: &str) -> IResult<&str, &str> {
-    let (i, _) = multispace1(i)?;
-    let (i, _) = tag("|<")(i)?;
-
-    let (i, elements) = fold_many1(
-        tuple((multispace1, take_till(">|"), multispace1)),
-        Vec::new(),
-        |mut acc, (_, thing, _)| {
-            acc.push(Box::new(thing));
-            acc
-        },
-    )(i)?;
-    let (i, _) = tuple((multispace1, tag(">|")))(i)?;
-
-    // context(
-    //     "js_pipe",
-    //     //
-    //     ,
-    // )(input)
+    context(
+        "js_pipe",
+        //
+        take_until("}|"),
+    )(i)
 }
 
 #[test]
 fn test_js_pipe() {
-    js_pipe("|< .test.obj >|")
+    let (_, r) = js_pipe("|{ .test.obj }|").unwrap();
+    assert_eq!(r, "|{ .test.obj");
 }
 
-// fn js_open_pipe(input: &str) -> IResult<&str, &str> {
-//     context(
-//         "js_open_pipe",
-//         //
-//         tag("|{"),
-//     )(input)
-// }
+/// JQ expression pipe
+///
+fn jq_pipe(i: &str) -> IResult<&str, &str> {
+    context(
+        "jq_pipe",
+        //
+        take_until(">|"),
+    )(i)
+}
 
-// fn js_close_pipe(input: &str) -> IResult<&str, bool> {
-//     context(
-//         "js_close_pipe",
-//         //
-//         tag("}|"),
-//     )(input)
-// }
-
-// fn jq_open_pipe(input: &str) -> IResult<&str, bool> {
-//     context(
-//         "jq_open_pipe",
-//         //
-//         tag("|<"),
-//     )(input)
-// }
-
-// fn jq_close_pipe(input: &str) -> IResult<&str, bool> {
-//     context(
-//         "jq_close_pipe",
-//         //
-//         tag(">|"),
-//     )(input)
-// }
-
-// fn foreach_open_pipe(input: &str) -> IResult<&str, bool> {
-//     context(
-//         "foreach_open_pipe",
-//         //
-//         tag("|["),
-//     )(input)
-// }
-
-// fn foreach_close_pipe(input: &str) -> IResult<&str, bool> {
-//     let (input, o) = context(
-//         "foreach_close_pipe",
-//         //
-//         tag("]|"),
-//     )(input);
-//     Ok((input, o == "]|"))
-// }
+#[test]
+fn test_jq_pipe() {
+    let (_, r) = jq_pipe("|< .test.obj >|").unwrap();
+    assert_eq!(r, "|< .test.obj");
+}
