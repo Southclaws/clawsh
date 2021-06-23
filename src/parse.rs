@@ -1,13 +1,17 @@
+#![allow(dead_code)]
+
 use nom::{
     branch::{alt, permutation},
-    bytes::complete::{tag, take_till, take_till1, take_until, take_while1},
+    bytes::complete::{is_a, tag, take_till, take_till1, take_until, take_while},
     character::complete::{anychar, char, multispace1},
-    combinator::opt,
-    error::{context, ParseError},
+    combinator::{eof, opt, value},
+    error::{context, convert_error, ContextError, ErrorKind, ParseError, VerboseError},
     multi::{fold_many1, many0, many1},
-    sequence::{terminated, tuple},
-    IResult,
+    sequence::{preceded, terminated, tuple},
+    take_while, Err, IResult,
 };
+
+use crate::procedure::{Filter, Procedure, Script};
 
 // curl -XPOST -H'Content-Type: application/json' -d'{\"ip\":\"91.121.87.14:2182\"}' https://api.open.mp/server/
 
@@ -70,7 +74,7 @@ use nom::{
 //     .map(|(_, v)| v)
 // }
 
-fn procedure(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
+fn procedure<T: Procedure>(i: &str) -> IResult<&str, Vec<(&str, T)>> {
     context(
         "procedure",
         //
@@ -79,7 +83,7 @@ fn procedure(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
             // tuple((tag("|{"), js_pipe)), //
             // tuple((tag("|<"), jq_pipe)), //
             tuple((take_until("|{"), js_pipe)),
-            tuple((take_until("|<"), jq_pipe)),
+            tuple((take_until("|<"), jql_pipe)),
             // tuple((take_until("|("), js_pipe)),
             // tuple((take_until("|["), js_pipe)),
             // tuple((take_until("|"), js_pipe)),
@@ -88,40 +92,102 @@ fn procedure(i: &str) -> IResult<&str, Vec<(&str, &str)>> {
     )(i)
 }
 
-#[test]
-fn test_procedure() {
-    let r = procedure("curl |{ js code }| manager |< .jq.expr >|");
-    println!("{:?}", r);
-}
+// #[test]
+// fn test_procedure() {
+//     let r = procedure("curl |{ js code }| manager |< .jq.expr >|");
+//     println!("{:?}", r);
+// }
 
 /// JavaScript pipe
 ///
-fn js_pipe(i: &str) -> IResult<&str, &str> {
-    context(
-        "js_pipe",
-        //
-        take_until("}|"),
+fn js_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, Script, E> {
+    match preceded(
+        context("Script procedure opening", tag("|{")),
+        alt((
+            terminated(
+                //
+                take_until("}|"),
+                tag("}|"),
+            ),
+            take_till(|c| c == '\0'),
+        )),
     )(i)
+    {
+        Ok(v) => Ok((
+            "",
+            Script {
+                raw: String::from(v.1),
+            },
+        )),
+        Err(e) => Err(e),
+    }
 }
 
 #[test]
 fn test_js_pipe() {
-    let (_, r) = js_pipe("|{ .test.obj }|").unwrap();
-    assert_eq!(r, "|{ .test.obj");
-}
-
-/// JQ expression pipe
-///
-fn jq_pipe(i: &str) -> IResult<&str, &str> {
-    context(
-        "jq_pipe",
-        //
-        take_until(">|"),
-    )(i)
+    let (_, r) = js_pipe::<(&str, ErrorKind)>("|{ () => '' }|").unwrap();
+    assert_eq!(r.raw, " () => '' ");
 }
 
 #[test]
-fn test_jq_pipe() {
-    let (_, r) = jq_pipe("|< .test.obj >|").unwrap();
-    assert_eq!(r, "|< .test.obj");
+fn test_js_pipe_err() {
+    let data = "| () => '' }|";
+    let result = js_pipe::<VerboseError<&str>>(data);
+    let error = result.unwrap_err();
+    error.map(|e| println!("{}", convert_error(data, e)));
+}
+
+#[test]
+fn test_js_pipe_without_terminator() {
+    let (_, r) = js_pipe::<(&str, ErrorKind)>("|{ () => ''").unwrap();
+    assert_eq!(r.raw, " () => ''");
+}
+
+/// JQL pipe
+///
+fn jql_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, Filter, E> {
+    match preceded(
+        context("JQL procedure opening", tag("|<")),
+        alt((
+            terminated(
+                //
+                take_until(">|"),
+                tag(">|"),
+            ),
+            take_till(|c| c == '\0'),
+        )),
+    )(i)
+    {
+        Ok(v) => Ok((
+            "",
+            Filter {
+                query: String::from(v.1),
+            },
+        )),
+        Err(e) => Err(e),
+    }
+}
+
+#[test]
+fn test_jql_pipe() {
+    let (_, r) = jql_pipe::<(&str, ErrorKind)>("|< () => '' >|").unwrap();
+    assert_eq!(r.query, " () => '' ");
+}
+
+#[test]
+fn test_jql_pipe_err() {
+    let data = "| () => '' >|";
+    let result = jql_pipe::<VerboseError<&str>>(data);
+    let error = result.unwrap_err();
+    error.map(|e| println!("{}", convert_error(data, e)));
+}
+
+#[test]
+fn test_jql_pipe_without_terminator() {
+    let (_, r) = jql_pipe::<(&str, ErrorKind)>("|< () => ''").unwrap();
+    assert_eq!(r.query, " () => ''");
 }
