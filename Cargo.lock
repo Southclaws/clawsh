@@ -569,6 +569,7 @@ dependencies = [
  "nom 6.1.0",
  "once_cell",
  "rustyline",
+ "serde_json",
  "starship",
  "tokio 0.3.5",
 ]

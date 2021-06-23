@@ -74,16 +74,14 @@ use crate::procedure::{Filter, Procedure, Script};
 //     .map(|(_, v)| v)
 // }
 
-fn procedure<T: Procedure>(i: &str) -> IResult<&str, Vec<(&str, T)>> {
+fn procedure(i: &str) -> IResult<&str, Vec<Procedure>> {
     context(
         "procedure",
         //
         many1(alt((
             //
-            // tuple((tag("|{"), js_pipe)), //
-            // tuple((tag("|<"), jq_pipe)), //
-            tuple((take_until("|{"), js_pipe)),
-            tuple((take_until("|<"), jql_pipe)),
+            js_pipe,
+            jql_pipe,
             // tuple((take_until("|("), js_pipe)),
             // tuple((take_until("|["), js_pipe)),
             // tuple((take_until("|"), js_pipe)),
@@ -102,7 +100,7 @@ fn procedure<T: Procedure>(i: &str) -> IResult<&str, Vec<(&str, T)>> {
 ///
 fn js_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
-) -> IResult<&'a str, Script, E> {
+) -> IResult<&'a str, Procedure, E> {
     match preceded(
         context("Script procedure opening", tag("|{")),
         alt((
@@ -117,9 +115,9 @@ fn js_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     {
         Ok(v) => Ok((
             "",
-            Script {
+            Procedure::Script(Script {
                 raw: String::from(v.1),
-            },
+            }),
         )),
         Err(e) => Err(e),
     }
@@ -128,7 +126,7 @@ fn js_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 #[test]
 fn test_js_pipe() {
     let (_, r) = js_pipe::<(&str, ErrorKind)>("|{ () => '' }|").unwrap();
-    assert_eq!(r.raw, " () => '' ");
+    assert_eq!(r.get_string(), " () => '' ");
 }
 
 #[test]
@@ -142,14 +140,14 @@ fn test_js_pipe_err() {
 #[test]
 fn test_js_pipe_without_terminator() {
     let (_, r) = js_pipe::<(&str, ErrorKind)>("|{ () => ''").unwrap();
-    assert_eq!(r.raw, " () => ''");
+    assert_eq!(r.get_string(), " () => ''");
 }
 
 /// JQL pipe
 ///
 fn jql_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
-) -> IResult<&'a str, Filter, E> {
+) -> IResult<&'a str, Procedure, E> {
     match preceded(
         context("JQL procedure opening", tag("|<")),
         alt((
@@ -164,9 +162,9 @@ fn jql_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     {
         Ok(v) => Ok((
             "",
-            Filter {
+            Procedure::Filter(Filter {
                 query: String::from(v.1),
-            },
+            }),
         )),
         Err(e) => Err(e),
     }
@@ -175,7 +173,7 @@ fn jql_pipe<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 #[test]
 fn test_jql_pipe() {
     let (_, r) = jql_pipe::<(&str, ErrorKind)>("|< () => '' >|").unwrap();
-    assert_eq!(r.query, " () => '' ");
+    assert_eq!(r.get_string(), " () => '' ");
 }
 
 #[test]
@@ -189,5 +187,5 @@ fn test_jql_pipe_err() {
 #[test]
 fn test_jql_pipe_without_terminator() {
     let (_, r) = jql_pipe::<(&str, ErrorKind)>("|< () => ''").unwrap();
-    assert_eq!(r.query, " () => ''");
+    assert_eq!(r.get_string(), " () => ''");
 }
